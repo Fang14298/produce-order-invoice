@@ -98,11 +98,15 @@
   .inv-sig-line{border-bottom:1px dashed #888;height:34px;margin-bottom:6px}
 
   @media print{
-    body *{visibility:hidden}
-    #invoicePage,#invoicePage *{visibility:visible}
-    #invoicePage{position:absolute;left:0;top:0;box-shadow:none;margin:0}
-    .invoice-wrap{padding:0;background:#fff}
-    @page{size:A4;margin:0}
+    .topbar, .panel, .toolbar{display:none !important}
+    .app{max-width:none;margin:0;padding:0}
+    .layout{display:block}
+    .invoice-wrap{background:#fff;padding:0;display:block}
+    #invoicePage{width:auto;min-height:0;padding:0;box-shadow:none;margin:0}
+    .inv-header,.inv-customer,.inv-bottom,.inv-signatures{page-break-inside:avoid}
+    table.inv-table{page-break-inside:auto}
+    table.inv-table tr{page-break-inside:avoid;page-break-after:auto}
+    @page{size:A4;margin:14mm 12mm}
   }
 </style>
 </head>
@@ -223,25 +227,19 @@ let SELECTED = null;
 
 /* ================= แปลงค่าวันที่จาก Google Sheets (GViz) ให้เป็น DD/MM/YYYY =================
    ค่าวันที่จากคอลัมน์ที่เป็น Date ในชีต GViz จะส่งมาเป็นข้อความดิบรูปแบบ "Date(YYYY,M,D)" หรือ
-   "Date(YYYY,M,D,H,Mi,S)" โดย M (เดือน) เริ่มนับที่ 0 ต้อง +1 ก่อนแสดงผลเสมอ */
+   "Date(YYYY,M,D,H,Mi,S)" โดย M (เดือน) เริ่มนับที่ 0 ต้อง +1 ก่อนแสดงผลเสมอ
+   หมายเหตุ: แสดงเฉพาะวันที่ ไม่แสดงเวลา แม้ค่าดิบจะมีเวลาติดมาด้วยก็ตาม */
 function parseGvizDate(raw) {
   if (!raw) return "";
   const s = String(raw).trim();
-  const m = s.match(/^Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?\)$/);
+  const m = s.match(/^Date\((\d+),(\d+),(\d+)/);
   if (!m) return s; // ไม่ใช่รูปแบบ Date(...) ก็คืนค่าเดิม (เผื่อชีตเก็บเป็นข้อความอยู่แล้ว)
   const year = parseInt(m[1], 10);
   const month = parseInt(m[2], 10) + 1; // GViz เดือนเริ่มที่ 0
   const day = parseInt(m[3], 10);
   const dd = String(day).padStart(2, "0");
   const mm = String(month).padStart(2, "0");
-  let result = `${dd}/${mm}/${year}`;
-  if (m[4] !== undefined) {
-    const hh = String(parseInt(m[4], 10)).padStart(2, "0");
-    const mi = String(parseInt(m[5], 10)).padStart(2, "0");
-    const ss = String(parseInt(m[6], 10)).padStart(2, "0");
-    result += ` ${hh}:${mi}:${ss}`;
-  }
-  return result;
+  return `${dd}/${mm}/${year}`;
 }
 
 /* ================= โหลดออเดอร์จาก Google Sheet (GViz, อ่านอย่างเดียว ไม่ต้องมี backend) ================= */
@@ -444,6 +442,10 @@ document.getElementById("searchInput").addEventListener("input", e => renderList
 document.getElementById("reloadBtn").addEventListener("click", loadOrders);
 document.getElementById("deliveryFee").addEventListener("input", recalcTotals);
 document.getElementById("printBtn").addEventListener("click", () => window.print());
+
+/* ================= ดาวน์โหลด PDF (แบ่งหน้าอัตโนมัติตามขนาดกระดาษ A4) =================
+   จับภาพใบบิลทั้งใบเป็น canvas เดียว แล้วตัด (slice) ตามความสูงของหนึ่งหน้ากระดาษ
+   วาดลง PDF ทีละหน้า เพื่อไม่ให้เนื้อหาถูกบีบอัดลงหน้าเดียว */
 document.getElementById("pdfBtn").addEventListener("click", async () => {
   const btn = document.getElementById("pdfBtn");
   const original = btn.textContent;
@@ -451,13 +453,34 @@ document.getElementById("pdfBtn").addEventListener("click", async () => {
   try {
     const node = document.getElementById("invoicePage");
     const canvas = await html2canvas(node, { scale: 2, useCORS: true, backgroundColor: "#ffffff" });
-    const imgData = canvas.toDataURL("image/png");
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF("p", "mm", "a4");
     const pageW = pdf.internal.pageSize.getWidth();
     const pageH = pdf.internal.pageSize.getHeight();
-    const imgH = (canvas.height * pageW) / canvas.width;
-    pdf.addImage(imgData, "PNG", 0, 0, pageW, Math.min(imgH, pageH));
+    const imgW = pageW;
+
+    // ความสูงหนึ่งหน้ากระดาษ แปลงจาก mm เป็นพิกเซลบน canvas (ตามอัตราส่วนความกว้าง)
+    const pageHeightPx = Math.floor((pageH * canvas.width) / imgW);
+
+    let renderedPx = 0;
+    let pageIndex = 0;
+    while (renderedPx < canvas.height) {
+      const sliceHeightPx = Math.min(pageHeightPx, canvas.height - renderedPx);
+      const pageCanvas = document.createElement("canvas");
+      pageCanvas.width = canvas.width;
+      pageCanvas.height = sliceHeightPx;
+      const ctx = pageCanvas.getContext("2d");
+      ctx.drawImage(canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx);
+      const sliceData = pageCanvas.toDataURL("image/png");
+      const sliceHmm = (sliceHeightPx * imgW) / canvas.width;
+
+      if (pageIndex > 0) pdf.addPage();
+      pdf.addImage(sliceData, "PNG", 0, 0, imgW, sliceHmm);
+
+      renderedPx += sliceHeightPx;
+      pageIndex++;
+    }
+
     pdf.save(`ใบแจ้งหนี้-${SELECTED ? SELECTED.orderId : "order"}.pdf`);
   } catch (e) {
     alert("สร้าง PDF ไม่สำเร็จ: " + e.message);
