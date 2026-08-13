@@ -443,9 +443,73 @@ document.getElementById("reloadBtn").addEventListener("click", loadOrders);
 document.getElementById("deliveryFee").addEventListener("input", recalcTotals);
 document.getElementById("printBtn").addEventListener("click", () => window.print());
 
-/* ================= ดาวน์โหลด PDF (แบ่งหน้าอัตโนมัติตามขนาดกระดาษ A4) =================
-   จับภาพใบบิลทั้งใบเป็น canvas เดียว แล้วตัด (slice) ตามความสูงของหนึ่งหน้ากระดาษ
-   วาดลง PDF ทีละหน้า เพื่อไม่ให้เนื้อหาถูกบีบอัดลงหน้าเดียว */
+/* ================= คำนวณจุดตัดหน้า PDF โดยอิงขอบเขตจริงของแต่ละแถว/บล็อก (เลียนแบบพิมพ์จริง) =================
+   ไม่ตัดกลางแถวสินค้าหรือกลางบล็อกสำคัญ, เว้นระยะขอบบน-ล่างต่อหน้าเท่ากับตอนพิมพ์ (14mm),
+   และแสดงหัวตารางซ้ำในหน้าถัดไปเมื่อรายการยาวเกินหนึ่งหน้า */
+function computePageSlices(node, canvas, pageHeightPx, marginPx) {
+  const containerTop = node.getBoundingClientRect().top;
+  const scale = canvas.width / node.getBoundingClientRect().width;
+  const protectedEls = Array.from(node.querySelectorAll(
+    '.inv-header, .inv-customer, table.inv-table thead, table.inv-table tbody tr, #mNoteWrap, .inv-bottom, .inv-signatures'
+  )).filter(el => el.offsetParent !== null);
+
+  const rects = protectedEls.map(el => {
+    const r = el.getBoundingClientRect();
+    return { top: (r.top - containerTop) * scale, bottom: (r.bottom - containerTop) * scale };
+  });
+
+  const theadEl = node.querySelector('table.inv-table thead');
+  const tbodyEl = node.querySelector('table.inv-table tbody');
+  let theadRectPx = null;
+  let tbodyBottomPx = 0;
+  if (theadEl) {
+    const r = theadEl.getBoundingClientRect();
+    theadRectPx = { top: (r.top - containerTop) * scale, bottom: (r.bottom - containerTop) * scale };
+  }
+  if (tbodyEl) {
+    const r = tbodyEl.getBoundingClientRect();
+    tbodyBottomPx = (r.bottom - containerTop) * scale;
+  }
+
+  const EPS = 0.5;
+  const pages = [];
+  let pageStart = 0;
+  let idx = 0;
+  while (pageStart < canvas.height - EPS) {
+    const pageIndex = pages.length;
+    const topReserve = pageIndex === 0 ? 0 : marginPx;
+    const bottomReserve = marginPx;
+    const repeatHeader = pageIndex > 0 && theadRectPx && pageStart >= theadRectPx.bottom - EPS && pageStart < tbodyBottomPx - EPS;
+    const headerReserve = repeatHeader ? (theadRectPx.bottom - theadRectPx.top) : 0;
+    const limit = pageStart + pageHeightPx - topReserve - bottomReserve - headerReserve;
+
+    let lastGoodBottom = -1;
+    let j = idx;
+    while (j < rects.length && rects[j].bottom <= limit + EPS) {
+      lastGoodBottom = rects[j].bottom;
+      j++;
+    }
+
+    let sliceEnd;
+    if (lastGoodBottom === -1) {
+      sliceEnd = Math.min(limit, canvas.height);
+      if (sliceEnd <= pageStart + EPS) sliceEnd = Math.min(pageStart + pageHeightPx, canvas.height);
+    } else {
+      sliceEnd = lastGoodBottom;
+      idx = j;
+      if (idx >= rects.length) sliceEnd = canvas.height;
+    }
+    sliceEnd = Math.min(Math.max(sliceEnd, pageStart + 1), canvas.height);
+
+    pages.push({ start: pageStart, end: sliceEnd, repeatHeader, topMarginPx: topReserve, bottomMarginPx: bottomReserve });
+    pageStart = sliceEnd;
+  }
+
+  if (pages.length) pages[pages.length - 1].bottomMarginPx = 0;
+  return { pages, theadRectPx };
+}
+
+/* ================= ดาวน์โหลด PDF (แบ่งหน้าเลียนแบบการพิมพ์จริง ไม่บีบ ไม่ตัดกลางแถว) ================= */
 document.getElementById("pdfBtn").addEventListener("click", async () => {
   const btn = document.getElementById("pdfBtn");
   const original = btn.textContent;
@@ -458,28 +522,35 @@ document.getElementById("pdfBtn").addEventListener("click", async () => {
     const pageW = pdf.internal.pageSize.getWidth();
     const pageH = pdf.internal.pageSize.getHeight();
     const imgW = pageW;
+    const pxPerMm = canvas.width / imgW;
+    const pageHeightPx = pageH * pxPerMm;
+    const marginPx = 14 * pxPerMm; // เท่ากับระยะขอบหน้ากระดาษตอนสั่งพิมพ์ (14mm)
 
-    // ความสูงหนึ่งหน้ากระดาษ แปลงจาก mm เป็นพิกเซลบน canvas (ตามอัตราส่วนความกว้าง)
-    const pageHeightPx = Math.floor((pageH * canvas.width) / imgW);
+    const { pages, theadRectPx } = computePageSlices(node, canvas, pageHeightPx, marginPx);
 
-    let renderedPx = 0;
-    let pageIndex = 0;
-    while (renderedPx < canvas.height) {
-      const sliceHeightPx = Math.min(pageHeightPx, canvas.height - renderedPx);
+    pages.forEach((pg, i) => {
+      const headerHeightPx = (pg.repeatHeader && theadRectPx) ? (theadRectPx.bottom - theadRectPx.top) : 0;
+      const bodyHeightPx = pg.end - pg.start;
+      const totalHeightPx = Math.max(1, Math.round(pg.topMarginPx + headerHeightPx + bodyHeightPx + pg.bottomMarginPx));
       const pageCanvas = document.createElement("canvas");
       pageCanvas.width = canvas.width;
-      pageCanvas.height = sliceHeightPx;
+      pageCanvas.height = totalHeightPx;
       const ctx = pageCanvas.getContext("2d");
-      ctx.drawImage(canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+
+      let y = pg.topMarginPx;
+      if (headerHeightPx > 0) {
+        ctx.drawImage(canvas, 0, theadRectPx.top, canvas.width, headerHeightPx, 0, y, canvas.width, headerHeightPx);
+        y += headerHeightPx;
+      }
+      ctx.drawImage(canvas, 0, pg.start, canvas.width, bodyHeightPx, 0, y, canvas.width, bodyHeightPx);
+
       const sliceData = pageCanvas.toDataURL("image/png");
-      const sliceHmm = (sliceHeightPx * imgW) / canvas.width;
-
-      if (pageIndex > 0) pdf.addPage();
+      const sliceHmm = (pageCanvas.height * imgW) / canvas.width;
+      if (i > 0) pdf.addPage();
       pdf.addImage(sliceData, "PNG", 0, 0, imgW, sliceHmm);
-
-      renderedPx += sliceHeightPx;
-      pageIndex++;
-    }
+    });
 
     pdf.save(`ใบแจ้งหนี้-${SELECTED ? SELECTED.orderId : "order"}.pdf`);
   } catch (e) {
