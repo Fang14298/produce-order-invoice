@@ -249,31 +249,77 @@ async function loadOrders() {
   }
 }
 
-function renderList(filterText) {
+function populateFilters() {
+  const dateSet = new Set(ORDERS.map(o => o.deliveryDate).filter(Boolean));
+  const statusSet = new Set(ORDERS.map(o => o.status).filter(Boolean));
+  
+  const fDate = document.getElementById("filterDate");
+  const fStatus = document.getElementById("filterStatus");
+  
+  const currDate = fDate.value;
+  const currStatus = fStatus.value;
+  
+  fDate.innerHTML = '<option value="">ทุกวันที่</option>' + [...dateSet].sort().map(d => `<option value="${d}">${d}</option>`).join("");
+  fStatus.innerHTML = '<option value="">ทุกสถานะ</option>' + [...statusSet].sort().map(s => `<option value="${s}">${s}</option>`).join("");
+  
+  if([...dateSet].includes(currDate)) fDate.value = currDate;
+  if([...statusSet].includes(currStatus)) fStatus.value = currStatus;
+}
+
+function renderList() {
   const list = document.getElementById("orderList");
-  const q = (filterText || "").trim().toLowerCase();
-  const filtered = !q ? ORDERS : ORDERS.filter(o =>
-    o.orderId.toLowerCase().includes(q) ||
-    o.shop.toLowerCase().includes(q) ||
-    o.phone.toLowerCase().includes(q)
-  );
+  const q = document.getElementById("searchInput").value.trim().toLowerCase();
+  const fDate = document.getElementById("filterDate").value;
+  const fStatus = document.getElementById("filterStatus").value;
+
+  const filtered = ORDERS.filter(o => {
+    const matchQ = !q || o.orderId.toLowerCase().includes(q) || o.shop.toLowerCase().includes(q) || o.phone.toLowerCase().includes(q);
+    const matchD = !fDate || o.deliveryDate === fDate;
+    const matchS = !fStatus || o.status === fStatus;
+    return matchQ && matchD && matchS;
+  });
+
   if (!filtered.length) {
-    list.innerHTML = '<div class="empty-msg">ไม่พบออเดอร์ที่ตรงกับคำค้นหา</div>';
+    list.innerHTML = '<div class="empty-msg">ไม่พบออเดอร์ที่ตรงกับเงื่อนไข</div>';
     return;
   }
-  list.innerHTML = filtered.map(o => `
-    <div class="order-item ${SELECTED && SELECTED.orderId === o.orderId ? 'active' : ''}" data-id="${o.orderId}">
-      <div class="oid">${o.orderId}</div>
-      <div class="ometa"><span>${o.shop || '-'}</span><span>${o.deliveryDate || '-'}</span></div>
-      <span class="status-pill">${o.status}</span>
-    </div>
-  `).join("");
+  
+  list.innerHTML = filtered.map(o => {
+    const isChecked = SELECTED_ORDERS.some(sel => sel.orderId === o.orderId);
+    return `
+      <div class="order-item ${isChecked ? 'active' : ''}" data-id="${o.orderId}">
+        <input type="checkbox" class="order-item-check" ${isChecked ? 'checked' : ''} tabindex="-1">
+        <div class="order-item-content">
+          <div class="oid">${o.orderId}</div>
+          <div class="ometa"><span>${o.shop || '-'}</span><span>${o.deliveryDate || '-'}</span></div>
+          <span class="status-pill">${o.status}</span>
+        </div>
+      </div>
+    `;
+  }).join("");
+
   list.querySelectorAll(".order-item").forEach(el => {
-    el.addEventListener("click", () => {
-      const order = ORDERS.find(o => o.orderId === el.dataset.id);
-      if (order) selectOrder(order);
+    el.addEventListener("click", (e) => {
+      if (e.target.tagName !== 'INPUT') {
+        const cb = el.querySelector('.order-item-check');
+        cb.checked = !cb.checked;
+      }
+      toggleOrderSelection(el.dataset.id, el.querySelector('.order-item-check').checked);
     });
   });
+}
+
+function toggleOrderSelection(orderId, isChecked) {
+  if (isChecked) {
+    const order = ORDERS.find(o => o.orderId === orderId);
+    if (order && !SELECTED_ORDERS.some(o => o.orderId === orderId)) {
+      SELECTED_ORDERS.push(order);
+    }
+  } else {
+    SELECTED_ORDERS = SELECTED_ORDERS.filter(o => o.orderId !== orderId);
+  }
+  renderList();
+  renderInvoices();
 }
 
 /* ================= แปลงข้อความสรุปรายการสินค้า กลับเป็นตารางแยกรายชิ้น =================
@@ -344,59 +390,146 @@ function renderQr(amount) {
 /* ================= แสดงผลใบบิล ================= */
 const fmtMoney = n => Number(n || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-function selectOrder(order) {
-  SELECTED = order;
-  document.getElementById("invPlaceholder").style.display = "none";
-  document.getElementById("invContent").style.display = "block";
-  document.getElementById("printBtn").disabled = false;
-  document.getElementById("pdfBtn").disabled = false;
+function renderInvoices() {
+  const placeholder = document.getElementById("invPlaceholder");
+  const content = document.getElementById("invContent");
+  const printBtn = document.getElementById("printBtn");
+  const pdfBtn = document.getElementById("pdfBtn");
 
-  document.getElementById("mOrderId").textContent = order.orderId;
-  document.getElementById("mDeliveryDate").textContent = order.deliveryDate || "-";
-  document.getElementById("mOrderDate").textContent = order.orderDate || "-";
-  document.getElementById("mShop").textContent = order.shop || "-";
-  document.getElementById("mPhone").textContent = order.phone || "-";
-  document.getElementById("mTaxId").textContent = (order.taxId && order.taxId !== "-") ? order.taxId : "-";
-  document.getElementById("mAddress").textContent = order.address || "-";
-
-  const items = parseItems(order.itemsRaw);
-  document.getElementById("mItemsBody").innerHTML = items.map((it, idx) => `
-    <tr>
-      <td class="center">${idx + 1}</td>
-      <td>${it.name}</td>
-      <td class="num">${it.qty !== "" ? it.qty : "-"}</td>
-      <td class="center">${it.unit || "-"}</td>
-      <td class="num">${it.price !== "" ? fmtMoney(it.price) : "-"}</td>
-      <td class="num">${fmtMoney(it.subtotal)}</td>
-    </tr>
-  `).join("");
-
-  const noteWrap = document.getElementById("mNoteWrap");
-  if (order.note) {
-    noteWrap.style.display = "block";
-    document.getElementById("mNote").textContent = order.note;
-  } else {
-    noteWrap.style.display = "none";
+  if (SELECTED_ORDERS.length === 0) {
+    placeholder.style.display = "flex";
+    content.style.display = "none";
+    printBtn.disabled = true;
+    pdfBtn.disabled = true;
+    content.innerHTML = "";
+    return;
   }
 
-  recalcTotals();
-  renderList(document.getElementById("searchInput").value.trim());
-}
+  placeholder.style.display = "none";
+  content.style.display = "block";
+  printBtn.disabled = false;
+  pdfBtn.disabled = false;
 
-function recalcTotals() {
-  if (!SELECTED) return;
   const fee = parseFloat(document.getElementById("deliveryFee").value) || 0;
-  const grand = SELECTED.total + fee;
-  document.getElementById("mSubtotal").textContent = fmtMoney(SELECTED.total) + " บาท";
-  document.getElementById("mDeliveryFeeShow").textContent = fmtMoney(fee) + " บาท";
-  document.getElementById("mGrand").textContent = fmtMoney(grand) + " บาท";
-  renderQr(grand);
+
+  content.innerHTML = SELECTED_ORDERS.map((order) => {
+    const items = parseItems(order.itemsRaw);
+    const itemsHtml = items.map((it, idx) => `
+      <tr>
+        <td class="center">${idx + 1}</td>
+        <td>${it.name}</td>
+        <td class="num">${it.qty !== "" ? it.qty : "-"}</td>
+        <td class="center">${it.unit || "-"}</td>
+        <td class="num">${it.price !== "" ? fmtMoney(it.price) : "-"}</td>
+        <td class="num">${fmtMoney(it.subtotal)}</td>
+      </tr>
+    `).join("");
+
+    const grand = order.total + fee;
+    const qrId = "qr_" + order.orderId;
+
+    return `
+      <div class="inv-block">
+        <div class="inv-header">
+          <div class="inv-brand">
+            <img class="inv-logo-img" src="LOGO.PNG" alt="โลโก้สวนผักสด">
+            <div>
+              <div class="inv-brand-title">สวนผักสด</div>
+              <div class="inv-brand-sub">สินค้าสดใหม่ คุณภาพส่งตรงถึงบ้าน</div>
+              <div class="inv-brand-contact">โทร: 093-3121105, 086-5868988 &nbsp;|&nbsp; Line: @746wpose</div>
+            </div>
+          </div>
+          <div class="inv-meta">
+            <div class="inv-doc-title">ใบส่งสินค้า / ใบแจ้งหนี้</div>
+            <div class="inv-meta-line"><b>เลขที่:</b> <span>${order.orderId}</span></div>
+            <div class="inv-meta-line"><b>วันที่ส่งสินค้า:</b> <span>${order.deliveryDate || "-"}</span></div>
+            <div class="inv-meta-sub">สั่งซื้อเมื่อ <span>${order.orderDate || "-"}</span></div>
+          </div>
+        </div>
+
+        <div class="inv-customer">
+          <div><b>ชื่อลูกค้า:</b> <span>${order.shop || "-"}</span></div>
+          <div><b>เบอร์โทรศัพท์:</b> <span>${order.phone || "-"}</span></div>
+          <div><b>เลขประจำตัวผู้เสียภาษี:</b> <span>${(order.taxId && order.taxId !== "-") ? order.taxId : "-"}</span></div>
+          <div><b>ที่อยู่จัดส่ง:</b> <span>${order.address || "-"}</span></div>
+        </div>
+
+        <table class="inv-table">
+          <thead>
+            <tr>
+              <th class="center" style="width:34px">No.</th>
+              <th>รายการ</th>
+              <th class="num" style="width:64px">จำนวน</th>
+              <th class="center" style="width:64px">หน่วยนับ</th>
+              <th class="num" style="width:90px">ราคา/หน่วย</th>
+              <th class="num" style="width:100px">จำนวนเงิน (บาท)</th>
+            </tr>
+          </thead>
+          <tbody>${itemsHtml}</tbody>
+        </table>
+
+        ${order.note ? `<div class="inv-note"><b>หมายเหตุ:</b> <span>${order.note}</span></div>` : ""}
+
+        <div class="inv-bottom">
+          <div class="inv-payment-box">
+            <img class="inv-qr-img" id="${qrId}" src="" alt="PromptPay QR">
+            <div class="inv-payment-info">
+              <div class="lbl">📲 สแกนเพื่อชำระเงิน</div>
+              <div><b>ชื่อบัญชี:</b> นางสาวชวัลลักษณ์ ไพบูลย์ชมพู</div>
+              <div><b>PromptPay:</b> 093-3121105</div>
+              <div style="font-size:10.5px;color:#777;margin-top:4px">*กรุณาตรวจนับสินค้าให้ถูกต้องก่อนสแกนชำระเงิน*</div>
+            </div>
+          </div>
+          <div class="inv-totals">
+            <div class="inv-total-row"><span>รวมราคาสินค้า:</span><span>${fmtMoney(order.total)} บาท</span></div>
+            <div class="inv-total-row"><span>ค่าจัดส่งเดลิเวอรี่:</span><span>${fmtMoney(fee)} บาท</span></div>
+            <div class="inv-total-row grand"><span>ยอดชำระสุทธิ:</span><span>${fmtMoney(grand)} บาท</span></div>
+          </div>
+        </div>
+
+        <div class="inv-signatures">
+          <div><div class="inv-sig-line"></div>ผู้ส่งสินค้า / พนักงานจัดส่ง</div>
+          <div><div class="inv-sig-line"></div>ผู้รับสินค้า / ผู้ชำระเงิน</div>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  SELECTED_ORDERS.forEach(order => {
+    const grand = order.total + fee;
+    const payload = formatPromptPayQR(PROMPTPAY_ID, grand, PROMPTPAY_NAME);
+    const qr = qrcode(0, 'M');
+    qr.addData(payload);
+    qr.make();
+    document.getElementById("qr_" + order.orderId).src = qr.createDataURL(6, 4);
+  });
 }
 
 /* ================= ปุ่มควบคุม ================= */
-document.getElementById("searchInput").addEventListener("input", e => renderList(e.target.value));
+document.getElementById("searchInput").addEventListener("input", renderList);
+document.getElementById("filterDate").addEventListener("change", renderList);
+document.getElementById("filterStatus").addEventListener("change", renderList);
+
+document.getElementById("selectAllCheckbox").addEventListener("change", e => {
+  const isChecked = e.target.checked;
+  const list = document.getElementById("orderList");
+  list.querySelectorAll(".order-item").forEach(el => {
+    const orderId = el.dataset.id;
+    if (isChecked) {
+      const order = ORDERS.find(o => o.orderId === orderId);
+      if (order && !SELECTED_ORDERS.some(o => o.orderId === orderId)) {
+        SELECTED_ORDERS.push(order);
+      }
+    } else {
+      SELECTED_ORDERS = SELECTED_ORDERS.filter(o => o.orderId !== orderId);
+    }
+  });
+  renderList();
+  renderInvoices();
+});
+
 document.getElementById("reloadBtn").addEventListener("click", loadOrders);
-document.getElementById("deliveryFee").addEventListener("input", recalcTotals);
+document.getElementById("deliveryFee").addEventListener("input", renderInvoices);
 document.getElementById("printBtn").addEventListener("click", () => window.print());
 
 /* ================= คำนวณจุดตัดหน้า PDF โดยอิงขอบเขตจริงของแต่ละแถว/บล็อก (เลียนแบบพิมพ์จริง) =================
