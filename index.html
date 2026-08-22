@@ -34,15 +34,24 @@
   .search-box input{width:100%;padding:10px 12px;border:1.5px solid var(--line);border-radius:10px;font-family:var(--font-body);font-size:14px}
   .search-box input:focus{outline:none;border-color:var(--green)}
   .order-list{max-height:60vh;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
-  .order-item{border:1px solid var(--line);border-radius:10px;padding:9px 11px;cursor:pointer;transition:.15s}
+  .filters-box { display:flex; gap:8px; margin-bottom:10px; }
+  .filters-box select { flex:1; padding:8px; border-radius:8px; border:1px solid var(--line); font-family:var(--font-body); font-size:13px; outline:none; }
+  .filters-box select:focus { border-color:var(--green); }
+  .select-all-wrap { display:flex; align-items:center; gap:8px; margin-bottom:10px; font-size:13px; cursor:pointer; }
+  .order-item{border:1px solid var(--line);border-radius:10px;padding:9px 11px;cursor:pointer;transition:.15s;display:flex;gap:10px;align-items:flex-start}
   .order-item:hover{border-color:var(--green);background:var(--green-soft)}
   .order-item.active{border-color:var(--green);background:var(--green-soft);box-shadow:0 0 0 2px var(--green) inset}
+  .order-item-check{margin-top:3px;}
+  .order-item-content{flex:1;}
   .order-item .oid{font-weight:700;font-size:13px;color:var(--green-dark)}
   .order-item .ometa{font-size:12px;color:var(--muted);margin-top:2px;display:flex;justify-content:space-between;gap:8px}
   .status-pill{display:inline-block;font-size:11px;padding:1px 8px;border-radius:99px;background:#eee;color:#555;margin-top:4px}
   .empty-msg{font-size:13px;color:var(--muted);padding:20px 6px;text-align:center}
   .reload-btn{width:100%;padding:9px;margin-top:10px;border:1.5px solid var(--line);border-radius:10px;background:#fff;font-family:var(--font-body);font-size:13px;cursor:pointer;color:var(--ink)}
   .reload-btn:hover{border-color:var(--green);color:var(--green-dark)}
+  
+  .inv-block{padding-bottom:20px;margin-bottom:20px;border-bottom:2px dashed #ccc;}
+  .inv-block:last-child{padding-bottom:0;margin-bottom:0;border-bottom:none;}
 
   .toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
   .toolbar .fee-field{display:flex;align-items:center;gap:6px;font-size:13px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:6px 10px}
@@ -103,6 +112,8 @@
     .layout{display:block}
     .invoice-wrap{background:#fff;padding:0;display:block}
     #invoicePage{width:auto;min-height:0;padding:0;box-shadow:none;margin:0}
+    .inv-block{page-break-after:always;border-bottom:none;margin-bottom:0;padding-bottom:0;}
+    .inv-block:last-child{page-break-after:auto;}
     .inv-header,.inv-customer,.inv-bottom,.inv-signatures{page-break-inside:avoid}
     table.inv-table{page-break-inside:auto}
     table.inv-table tr{page-break-inside:avoid;page-break-after:auto}
@@ -126,6 +137,14 @@
       <div class="search-box">
         <input type="text" id="searchInput" placeholder="ค้นหาเลขที่ออเดอร์ / ชื่อลูกค้า / เบอร์โทร">
       </div>
+      <div class="filters-box">
+        <select id="filterDate"><option value="">ทุกวันที่</option></select>
+        <select id="filterStatus"><option value="">ทุกสถานะ</option></select>
+      </div>
+      <label class="select-all-wrap">
+        <input type="checkbox" id="selectAllCheckbox">
+        <span>เลือกทั้งหมด (ที่กรองไว้)</span>
+      </label>
       <div class="order-list" id="orderList">
         <div class="empty-msg">กำลังโหลดรายการออเดอร์...</div>
       </div>
@@ -146,69 +165,7 @@
       <div class="invoice-wrap">
         <div id="invoicePage">
           <div class="inv-placeholder" id="invPlaceholder">เลือกออเดอร์จากรายการด้านซ้ายเพื่อแสดงใบบิล</div>
-          <div id="invContent" style="display:none">
-            <div class="inv-header">
-              <div class="inv-brand">
-                <img class="inv-logo-img" src="LOGO.PNG" alt="โลโก้สวนผักสด">
-                <div>
-                  <div class="inv-brand-title">สวนผักสด</div>
-                  <div class="inv-brand-sub">สินค้าสดใหม่ คุณภาพส่งตรงถึงบ้าน</div>
-                  <div class="inv-brand-contact">โทร: 093-3121105, 086-5868988 &nbsp;|&nbsp; Line: @746wpose</div>
-                </div>
-              </div>
-              <div class="inv-meta">
-                <div class="inv-doc-title">ใบส่งสินค้า / ใบแจ้งหนี้</div>
-                <div class="inv-meta-line"><b>เลขที่:</b> <span id="mOrderId">-</span></div>
-                <div class="inv-meta-line"><b>วันที่ส่งสินค้า:</b> <span id="mDeliveryDate">-</span></div>
-                <div class="inv-meta-sub">สั่งซื้อเมื่อ <span id="mOrderDate">-</span></div>
-              </div>
-            </div>
-
-            <div class="inv-customer">
-              <div><b>ชื่อลูกค้า:</b> <span id="mShop">-</span></div>
-              <div><b>เบอร์โทรศัพท์:</b> <span id="mPhone">-</span></div>
-              <div><b>เลขประจำตัวผู้เสียภาษี:</b> <span id="mTaxId">-</span></div>
-              <div><b>ที่อยู่จัดส่ง:</b> <span id="mAddress">-</span></div>
-            </div>
-
-            <table class="inv-table">
-              <thead>
-                <tr>
-                  <th class="center" style="width:34px">No.</th>
-                  <th>รายการ</th>
-                  <th class="num" style="width:64px">จำนวน</th>
-                  <th class="center" style="width:64px">หน่วยนับ</th>
-                  <th class="num" style="width:90px">ราคา/หน่วย</th>
-                  <th class="num" style="width:100px">จำนวนเงิน (บาท)</th>
-                </tr>
-              </thead>
-              <tbody id="mItemsBody"></tbody>
-            </table>
-
-            <div id="mNoteWrap" style="display:none" class="inv-note"><b>หมายเหตุ:</b> <span id="mNote"></span></div>
-
-            <div class="inv-bottom">
-              <div class="inv-payment-box">
-                <img class="inv-qr-img" id="mQr" src="" alt="PromptPay QR">
-                <div class="inv-payment-info">
-                  <div class="lbl">📲 สแกนเพื่อชำระเงิน</div>
-                  <div><b>ชื่อบัญชี:</b> นางสาวชวัลลักษณ์ ไพบูลย์ชมพู</div>
-                  <div><b>PromptPay:</b> 093-3121105</div>
-                  <div style="font-size:10.5px;color:#777;margin-top:4px">*กรุณาตรวจนับสินค้าให้ถูกต้องก่อนสแกนชำระเงิน*</div>
-                </div>
-              </div>
-              <div class="inv-totals">
-                <div class="inv-total-row"><span>รวมราคาสินค้า:</span><span id="mSubtotal">0.00 บาท</span></div>
-                <div class="inv-total-row"><span>ค่าจัดส่งเดลิเวอรี่:</span><span id="mDeliveryFeeShow">0.00 บาท</span></div>
-                <div class="inv-total-row grand"><span>ยอดชำระสุทธิ:</span><span id="mGrand">0.00 บาท</span></div>
-              </div>
-            </div>
-
-            <div class="inv-signatures">
-              <div><div class="inv-sig-line"></div>ผู้ส่งสินค้า / พนักงานจัดส่ง</div>
-              <div><div class="inv-sig-line"></div>ผู้รับสินค้า / ผู้ชำระเงิน</div>
-            </div>
-          </div>
+          <div id="invContent"></div>
         </div>
       </div>
     </div>
@@ -223,7 +180,7 @@ const PROMPTPAY_ID = "0933121105";
 const PROMPTPAY_NAME = "SUANPHAKSOD"; // ต้องเป็น A-Z เท่านั้นตามสเปค EMVCo
 
 let ORDERS = [];
-let SELECTED = null;
+let SELECTED_ORDERS = [];
 
 /* ================= แปลงค่าวันที่จาก Google Sheets (GViz) ให้เป็น DD/MM/YYYY =================
    ค่าวันที่จากคอลัมน์ที่เป็น Date ในชีต GViz จะส่งมาเป็นข้อความดิบรูปแบบ "Date(YYYY,M,D)" หรือ
@@ -284,9 +241,8 @@ async function loadOrders() {
       }))
       .filter(o => o.orderId);
 
-    renderList(document.getElementById("searchInput").value.trim());
-
-    if (ORDERS.length && !SELECTED) selectOrder(ORDERS[0]);
+    populateFilters();
+    renderList();
   } catch (e) {
     console.warn("โหลดออเดอร์ไม่สำเร็จ:", e);
     list.innerHTML = '<div class="empty-msg">โหลดข้อมูลไม่สำเร็จ — ตรวจสอบว่าชีตแชร์แบบ "ทุกคนที่มีลิงก์ - ผู้มีสิทธิ์ดู" แล้ว</div>';
@@ -552,7 +508,7 @@ document.getElementById("pdfBtn").addEventListener("click", async () => {
       pdf.addImage(sliceData, "PNG", 0, 0, imgW, sliceHmm);
     });
 
-    pdf.save(`ใบแจ้งหนี้-${SELECTED ? SELECTED.orderId : "order"}.pdf`);
+    pdf.save(`ใบแจ้งหนี้-${SELECTED_ORDERS.length === 1 ? SELECTED_ORDERS[0].orderId : "batch"}.pdf`);
   } catch (e) {
     alert("สร้าง PDF ไม่สำเร็จ: " + e.message);
   } finally {
