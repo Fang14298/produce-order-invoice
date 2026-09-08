@@ -178,6 +178,10 @@ const ORDER_SHEET_NAME = "รายการออเดอร์";
 const PROMPTPAY_ID = "0933121105";
 const PROMPTPAY_NAME = "SUANPHAKSOD"; // ต้องเป็น A-Z เท่านั้นตามสเปค EMVCo
 
+/* URL โลโก้ในหัวบิล + cache-busting: เติม ?v=<timestamp> ต่อท้ายทุกครั้งที่เปิดหน้าเว็บ
+   เพื่อบังคับให้เบราว์เซอร์โหลดไฟล์ LOGO.PNG ใหม่เสมอ แม้จะแทนที่ไฟล์โดยใช้ชื่อเดิม */
+const LOGO_SRC = "LOGO.PNG?v=" + Date.now();
+
 let ORDERS = [];
 let SELECTED_ORDERS = [];
 
@@ -185,6 +189,14 @@ let SELECTED_ORDERS = [];
    ข้อมูลจากผู้ใช้ (ชื่อลูกค้า/เบอร์โทร/ที่อยู่/หมายเหตุ/รายการสินค้า ฯลฯ) อาจมีอักขระพิเศษ
    เช่น <, >, &, " ปนมา หากใส่ลง innerHTML ตรงๆ จะทำให้โครงสร้างบิลเพี้ยนหรือเปิดช่องให้แทรกโค้ดได้
    ฟังก์ชันนี้แปลงอักขระเหล่านั้นให้เป็น HTML entity ก่อนแสดงผลเสมอ */
+/* ================= แปลงค่าตัวเลขจากชีตให้เป็น Number อย่างปลอดภัย =================
+   คอลัมน์ตัวเลข (เช่น "ยอดรวม") อาจถูกเก็บเป็นข้อความที่มีตัวคั่นหลักพัน เช่น "1,234.00"
+   ซึ่ง Number("1,234.00") จะได้ NaN แล้วตกไปเป็น 0 เงียบๆ ทำให้ยอดในบิลและยอดล็อกใน
+   PromptPay QR ผิด — ฟังก์ชันนี้ตัด comma และช่องว่างออกก่อนแปลงเสมอ */
+function toNumber(v) {
+  return Number(String(v ?? "").replace(/,/g, "").trim()) || 0;
+}
+
 function escapeHtml(str) {
   return String(str ?? "").replace(/[&<>"']/g, ch => ({
     "&": "&amp;",
@@ -257,7 +269,7 @@ async function loadOrders() {
         taxId: String(val(r, iTax)).trim(),
         deliveryDate: parseGvizDate(val(r, iDate)),
         itemsRaw: String(val(r, iItems)).trim(),
-        total: Number(val(r, iTotal)) || 0,
+        total: toNumber(val(r, iTotal)),
         note: String(val(r, iNote)).trim(),
         status: String(val(r, iStatus)).trim() || "รอยืนยัน",
         lineUserId: String(val(r, iLine)).trim()
@@ -402,14 +414,6 @@ function crc16(s) {
   }
   return crc.toString(16).padStart(4, '0');
 }
-function renderQr(amount) {
-  const payload = formatPromptPayQR(PROMPTPAY_ID, amount, PROMPTPAY_NAME);
-  const qr = qrcode(0, 'M');
-  qr.addData(payload);
-  qr.make();
-  document.getElementById("mQr").src = qr.createDataURL(6, 4);
-}
-
 /* ================= แสดงผลใบบิล ================= */
 const fmtMoney = n => Number(n || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -455,7 +459,7 @@ function renderInvoices() {
       <div class="inv-block">
         <div class="inv-header">
           <div class="inv-brand">
-            <img class="inv-logo-img" src="LOGO.PNG" alt="โลโก้สวนผักสด">
+            <img class="inv-logo-img" src="${LOGO_SRC}" alt="โลโก้สวนผักสด">
             <div>
               <div class="inv-brand-title">ร้านสวนผักสด</div>
               <div class="inv-brand-sub">สินค้าสดใหม่ คุณภาพส่งตรงถึงบ้าน</div>
