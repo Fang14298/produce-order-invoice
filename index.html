@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="light">
-<title>ใบส่งสินค้า / ใบแจ้งหนี้ | ร้านสวนผักสด</title>
+<title>ใบรับสินค้า / ใบส่งสินค้า / ใบแจ้งหนี้ | ร้านสวนผักสด</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@500;600;700&family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
@@ -126,7 +126,7 @@
 <div class="app">
   <div class="topbar">
     <div>
-      <h1>🧾 ระบบพิมพ์ใบส่งสินค้า / ใบแจ้งหนี้</h1>
+      <h1>🧾 ระบบพิมพ์ใบรับสินค้า / ใบส่งสินค้า / ใบแจ้งหนี้</h1>
     </div>
   </div>
 
@@ -417,6 +417,93 @@ function crc16(s) {
 /* ================= แสดงผลใบบิล ================= */
 const fmtMoney = n => Number(n || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+/* ================= สร้างบล็อกเอกสาร 1 ใบ (ใช้เทมเพลตร่วมกันทั้ง 2 แบบ) =================
+   แต่ละออเดอร์จะออกเอกสาร 2 ใบ โดยใช้ฟังก์ชันนี้ตัวเดียว เพื่อไม่ต้องแก้ 2 ที่เวลาปรับหน้าตาบิล
+   - variant "receipt" = ใบรับสินค้า  : ตารางมีแค่ No./รายการ/จำนวน/หน่วยนับ, ไม่มีกล่อง QR ชำระเงินและสรุปยอด
+   - variant "invoice" = ใบส่งสินค้า/ใบแจ้งหนี้ : แสดงครบทุกส่วนเหมือนเดิม (มีราคา ยอดรวม และ QR PromptPay) */
+function buildDocBlock(order, fee, variant) {
+  const isReceipt = variant === "receipt";
+  const items = parseItems(order.itemsRaw);
+  const grand = order.total + fee;
+  const qrId = "qr_" + order.orderId;
+
+  const itemsHtml = items.map((it, idx) => `
+      <tr>
+        <td class="center">${idx + 1}</td>
+        <td>${escapeHtml(it.name)}</td>
+        <td class="num">${it.qty !== "" ? escapeHtml(it.qty) : "-"}</td>
+        <td class="center">${escapeHtml(it.unit) || "-"}</td>${isReceipt ? "" : `
+        <td class="num">${it.price !== "" ? fmtMoney(it.price) : "-"}</td>
+        <td class="num">${fmtMoney(it.subtotal)}</td>`}
+      </tr>
+    `).join("");
+
+  return `
+      <div class="inv-block">
+        <div class="inv-header">
+          <div class="inv-brand">
+            <img class="inv-logo-img" src="${LOGO_SRC}" alt="โลโก้สวนผักสด">
+            <div>
+              <div class="inv-brand-title">ร้านสวนผักสด</div>
+              <div class="inv-brand-sub">สินค้าสดใหม่ คุณภาพส่งตรงถึงบ้าน</div>
+              <div class="inv-brand-contact">โทร: 093-3121105, 086-5868988 &nbsp;|&nbsp; Line: @746wpose</div>
+            </div>
+          </div>
+          <div class="inv-meta">
+            <div class="inv-doc-title">${isReceipt ? "ใบรับสินค้า" : "ใบส่งสินค้า / ใบแจ้งหนี้"}</div>
+            <div class="inv-meta-line"><b>เลขที่:</b> <span>${escapeHtml(order.orderId)}</span></div>
+            <div class="inv-meta-line"><b>วันที่ส่งสินค้า:</b> <span>${escapeHtml(order.deliveryDate) || "-"}</span></div>
+            <div class="inv-meta-sub">สั่งซื้อเมื่อ <span>${escapeHtml(order.orderDate) || "-"}</span></div>
+          </div>
+        </div>
+
+        <div class="inv-customer">
+          <div><b>ชื่อลูกค้า:</b> <span>${escapeHtml(order.shop) || "-"}</span></div>
+          <div><b>เบอร์โทรศัพท์:</b> <span>${escapeHtml(order.phone) || "-"}</span></div>
+          <div><b>เลขประจำตัวผู้เสียภาษี:</b> <span>${(order.taxId && order.taxId !== "-") ? escapeHtml(order.taxId) : "-"}</span></div>
+          <div><b>ที่อยู่จัดส่ง:</b> <span>${escapeHtml(order.address) || "-"}</span></div>
+        </div>
+
+        <table class="inv-table">
+          <thead>
+            <tr>
+              <th class="center" style="width:34px">No.</th>
+              <th>รายการ</th>
+              <th class="num" style="width:64px">จำนวน</th>
+              <th class="center" style="width:64px">หน่วยนับ</th>${isReceipt ? "" : `
+              <th class="num" style="width:90px">ราคา/หน่วย</th>
+              <th class="num" style="width:100px">จำนวนเงิน (บาท)</th>`}
+            </tr>
+          </thead>
+          <tbody>${itemsHtml}</tbody>
+        </table>
+
+        ${order.note ? `<div class="inv-note"><b>หมายเหตุ:</b> <span>${escapeHtml(order.note)}</span></div>` : ""}
+${isReceipt ? "" : `
+        <div class="inv-bottom">
+          <div class="inv-payment-box">
+            <img class="inv-qr-img" id="${escapeHtml(qrId)}" src="" alt="PromptPay QR">
+            <div class="inv-payment-info">
+              <div class="lbl">สแกนผ่านแอปธนาคารเพื่อชำระเงิน</div>
+              <div><b>ชื่อบัญชี:</b> นางสาวชวัลลักษณ์ ไพบูลย์ชมพู</div>
+              <div><b>PromptPay:</b> 093-3121105</div>
+              <div style="font-size:10.5px;color:#222;margin-top:4px">*กรุณาตรวจนับสินค้าให้ถูกต้องก่อนสแกนชำระเงิน*</div>
+            </div>
+          </div>
+          <div class="inv-totals">
+            <div class="inv-total-row"><span>รวมราคาสินค้า:</span><span>${fmtMoney(order.total)} บาท</span></div>
+            <div class="inv-total-row"><span>ค่าจัดส่ง:</span><span>${fmtMoney(fee)} บาท</span></div>
+            <div class="inv-total-row grand"><span>ยอดชำระสุทธิ:</span><span>${fmtMoney(grand)} บาท</span></div>
+          </div>
+        </div>`}
+
+        <div class="inv-signatures">
+          <div><div class="inv-sig-line"></div>ผู้ส่งสินค้า / พนักงานจัดส่ง</div>
+          <div><div class="inv-sig-line"></div>${isReceipt ? "ผู้รับสินค้า" : "ผู้รับสินค้า / ผู้ชำระเงิน"}</div>
+        </div>
+      </div>
+    `;
+}
 function renderInvoices() {
   const placeholder = document.getElementById("invPlaceholder");
   const content = document.getElementById("invContent");
@@ -439,88 +526,10 @@ function renderInvoices() {
 
   const fee = parseFloat(document.getElementById("deliveryFee").value) || 0;
 
-  content.innerHTML = SELECTED_ORDERS.map((order) => {
-    const items = parseItems(order.itemsRaw);
-    const itemsHtml = items.map((it, idx) => `
-      <tr>
-        <td class="center">${idx + 1}</td>
-        <td>${escapeHtml(it.name)}</td>
-        <td class="num">${it.qty !== "" ? escapeHtml(it.qty) : "-"}</td>
-        <td class="center">${escapeHtml(it.unit) || "-"}</td>
-        <td class="num">${it.price !== "" ? fmtMoney(it.price) : "-"}</td>
-        <td class="num">${fmtMoney(it.subtotal)}</td>
-      </tr>
-    `).join("");
-
-    const grand = order.total + fee;
-    const qrId = "qr_" + order.orderId;
-
-    return `
-      <div class="inv-block">
-        <div class="inv-header">
-          <div class="inv-brand">
-            <img class="inv-logo-img" src="${LOGO_SRC}" alt="โลโก้สวนผักสด">
-            <div>
-              <div class="inv-brand-title">ร้านสวนผักสด</div>
-              <div class="inv-brand-sub">สินค้าสดใหม่ คุณภาพส่งตรงถึงบ้าน</div>
-              <div class="inv-brand-contact">โทร: 093-3121105, 086-5868988 &nbsp;|&nbsp; Line: @746wpose</div>
-            </div>
-          </div>
-          <div class="inv-meta">
-            <div class="inv-doc-title">ใบส่งสินค้า / ใบแจ้งหนี้</div>
-            <div class="inv-meta-line"><b>เลขที่:</b> <span>${escapeHtml(order.orderId)}</span></div>
-            <div class="inv-meta-line"><b>วันที่ส่งสินค้า:</b> <span>${escapeHtml(order.deliveryDate) || "-"}</span></div>
-            <div class="inv-meta-sub">สั่งซื้อเมื่อ <span>${escapeHtml(order.orderDate) || "-"}</span></div>
-          </div>
-        </div>
-
-        <div class="inv-customer">
-          <div><b>ชื่อลูกค้า:</b> <span>${escapeHtml(order.shop) || "-"}</span></div>
-          <div><b>เบอร์โทรศัพท์:</b> <span>${escapeHtml(order.phone) || "-"}</span></div>
-          <div><b>เลขประจำตัวผู้เสียภาษี:</b> <span>${(order.taxId && order.taxId !== "-") ? escapeHtml(order.taxId) : "-"}</span></div>
-          <div><b>ที่อยู่จัดส่ง:</b> <span>${escapeHtml(order.address) || "-"}</span></div>
-        </div>
-
-        <table class="inv-table">
-          <thead>
-            <tr>
-              <th class="center" style="width:34px">No.</th>
-              <th>รายการ</th>
-              <th class="num" style="width:64px">จำนวน</th>
-              <th class="center" style="width:64px">หน่วยนับ</th>
-              <th class="num" style="width:90px">ราคา/หน่วย</th>
-              <th class="num" style="width:100px">จำนวนเงิน (บาท)</th>
-            </tr>
-          </thead>
-          <tbody>${itemsHtml}</tbody>
-        </table>
-
-        ${order.note ? `<div class="inv-note"><b>หมายเหตุ:</b> <span>${escapeHtml(order.note)}</span></div>` : ""}
-
-        <div class="inv-bottom">
-          <div class="inv-payment-box">
-            <img class="inv-qr-img" id="${escapeHtml(qrId)}" src="" alt="PromptPay QR">
-            <div class="inv-payment-info">
-              <div class="lbl">สแกนผ่านแอปธนาคารเพื่อชำระเงิน</div>
-              <div><b>ชื่อบัญชี:</b> นางสาวชวัลลักษณ์ ไพบูลย์ชมพู</div>
-              <div><b>PromptPay:</b> 093-3121105</div>
-              <div style="font-size:10.5px;color:#222;margin-top:4px">*กรุณาตรวจนับสินค้าให้ถูกต้องก่อนสแกนชำระเงิน*</div>
-            </div>
-          </div>
-          <div class="inv-totals">
-            <div class="inv-total-row"><span>รวมราคาสินค้า:</span><span>${fmtMoney(order.total)} บาท</span></div>
-            <div class="inv-total-row"><span>ค่าจัดส่ง:</span><span>${fmtMoney(fee)} บาท</span></div>
-            <div class="inv-total-row grand"><span>ยอดชำระสุทธิ:</span><span>${fmtMoney(grand)} บาท</span></div>
-          </div>
-        </div>
-
-        <div class="inv-signatures">
-          <div><div class="inv-sig-line"></div>ผู้ส่งสินค้า / พนักงานจัดส่ง</div>
-          <div><div class="inv-sig-line"></div>ผู้รับสินค้า / ผู้ชำระเงิน</div>
-        </div>
-      </div>
-    `;
-  }).join("");
+  // แต่ละออเดอร์ออกเอกสาร 2 ใบเรียงกัน: ใบรับสินค้า มาก่อน แล้วตามด้วยใบส่งสินค้า/ใบแจ้งหนี้
+  content.innerHTML = SELECTED_ORDERS
+    .map(order => buildDocBlock(order, fee, "receipt") + buildDocBlock(order, fee, "invoice"))
+    .join("");
 
   SELECTED_ORDERS.forEach(order => {
     const grand = order.total + fee;
@@ -679,7 +688,7 @@ document.getElementById("pdfBtn").addEventListener("click", async () => {
       pdf.addImage(sliceData, "PNG", 0, 0, imgW, sliceHmm);
     });
 
-    pdf.save(`ใบแจ้งหนี้-${SELECTED_ORDERS.length === 1 ? SELECTED_ORDERS[0].orderId : "batch"}.pdf`);
+    pdf.save(`ใบรับ-ใบส่งสินค้า-${SELECTED_ORDERS.length === 1 ? SELECTED_ORDERS[0].orderId : "batch"}.pdf`);
   } catch (e) {
     alert("สร้าง PDF ไม่สำเร็จ: " + e.message);
   } finally {
