@@ -181,6 +181,30 @@ const PROMPTPAY_NAME = "SUANPHAKSOD"; // ต้องเป็น A-Z เท่�
 let ORDERS = [];
 let SELECTED_ORDERS = [];
 
+/* ================= ป้องกัน HTML/Script Injection จากข้อมูลในชีต =================
+   ข้อมูลจากผู้ใช้ (ชื่อลูกค้า/เบอร์โทร/ที่อยู่/หมายเหตุ/รายการสินค้า ฯลฯ) อาจมีอักขระพิเศษ
+   เช่น <, >, &, " ปนมา หากใส่ลง innerHTML ตรงๆ จะทำให้โครงสร้างบิลเพี้ยนหรือเปิดช่องให้แทรกโค้ดได้
+   ฟังก์ชันนี้แปลงอักขระเหล่านั้นให้เป็น HTML entity ก่อนแสดงผลเสมอ */
+function escapeHtml(str) {
+  return String(str ?? "").replace(/[&<>"']/g, ch => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[ch]));
+}
+
+/* ================= เปรียบเทียบวันที่รูปแบบไทย "DD/MM/YYYY" ตามลำดับเวลาจริง =================
+   ใช้แทน Array.sort() แบบ default ที่เรียงเป็น string (ทำให้ "1/12/2026" มาก่อน "9/1/2026" ผิดลำดับ) */
+function compareThaiDate(a, b) {
+  const pa = String(a).split("/").map(Number);
+  const pb = String(b).split("/").map(Number);
+  const va = (pa[2] || 0) * 10000 + (pa[1] || 0) * 100 + (pa[0] || 0);
+  const vb = (pb[2] || 0) * 10000 + (pb[1] || 0) * 100 + (pb[0] || 0);
+  return va - vb;
+}
+
 /* ================= แปลงค่าวันที่จาก Google Sheets (GViz) ให้เป็น DD/MM/YYYY =================
    ค่าวันที่จากคอลัมน์ที่เป็น Date ในชีต GViz จะส่งมาเป็นข้อความดิบรูปแบบ "Date(YYYY,M,D)" หรือ
    "Date(YYYY,M,D,H,Mi,S)" โดย M (เดือน) เริ่มนับที่ 0 ต้อง +1 ก่อนแสดงผลเสมอ
@@ -258,8 +282,8 @@ function populateFilters() {
   const currDate = fDate.value;
   const currStatus = fStatus.value;
   
-  fDate.innerHTML = '<option value="">ทุกวันที่</option>' + [...dateSet].sort().map(d => `<option value="${d}">${d}</option>`).join("");
-  fStatus.innerHTML = '<option value="">ทุกสถานะ</option>' + [...statusSet].sort().map(s => `<option value="${s}">${s}</option>`).join("");
+  fDate.innerHTML = '<option value="">ทุกวันที่</option>' + [...dateSet].sort(compareThaiDate).map(d => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join("");
+  fStatus.innerHTML = '<option value="">ทุกสถานะ</option>' + [...statusSet].sort().map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join("");
   
   if([...dateSet].includes(currDate)) fDate.value = currDate;
   if([...statusSet].includes(currStatus)) fStatus.value = currStatus;
@@ -286,12 +310,12 @@ function renderList() {
   list.innerHTML = filtered.map(o => {
     const isChecked = SELECTED_ORDERS.some(sel => sel.orderId === o.orderId);
     return `
-      <div class="order-item ${isChecked ? 'active' : ''}" data-id="${o.orderId}">
+      <div class="order-item ${isChecked ? 'active' : ''}" data-id="${escapeHtml(o.orderId)}">
         <input type="checkbox" class="order-item-check" ${isChecked ? 'checked' : ''} tabindex="-1">
         <div class="order-item-content">
-          <div class="oid">${o.orderId}</div>
-          <div class="ometa"><span>${o.shop || '-'}</span><span>${o.deliveryDate || '-'}</span></div>
-          <span class="status-pill">${o.status}</span>
+          <div class="oid">${escapeHtml(o.orderId)}</div>
+          <div class="ometa"><span>${escapeHtml(o.shop) || '-'}</span><span>${escapeHtml(o.deliveryDate) || '-'}</span></div>
+          <span class="status-pill">${escapeHtml(o.status)}</span>
         </div>
       </div>
     `;
@@ -416,9 +440,9 @@ function renderInvoices() {
     const itemsHtml = items.map((it, idx) => `
       <tr>
         <td class="center">${idx + 1}</td>
-        <td>${it.name}</td>
-        <td class="num">${it.qty !== "" ? it.qty : "-"}</td>
-        <td class="center">${it.unit || "-"}</td>
+        <td>${escapeHtml(it.name)}</td>
+        <td class="num">${it.qty !== "" ? escapeHtml(it.qty) : "-"}</td>
+        <td class="center">${escapeHtml(it.unit) || "-"}</td>
         <td class="num">${it.price !== "" ? fmtMoney(it.price) : "-"}</td>
         <td class="num">${fmtMoney(it.subtotal)}</td>
       </tr>
@@ -440,17 +464,17 @@ function renderInvoices() {
           </div>
           <div class="inv-meta">
             <div class="inv-doc-title">ใบส่งสินค้า / ใบแจ้งหนี้</div>
-            <div class="inv-meta-line"><b>เลขที่:</b> <span>${order.orderId}</span></div>
-            <div class="inv-meta-line"><b>วันที่ส่งสินค้า:</b> <span>${order.deliveryDate || "-"}</span></div>
-            <div class="inv-meta-sub">สั่งซื้อเมื่อ <span>${order.orderDate || "-"}</span></div>
+            <div class="inv-meta-line"><b>เลขที่:</b> <span>${escapeHtml(order.orderId)}</span></div>
+            <div class="inv-meta-line"><b>วันที่ส่งสินค้า:</b> <span>${escapeHtml(order.deliveryDate) || "-"}</span></div>
+            <div class="inv-meta-sub">สั่งซื้อเมื่อ <span>${escapeHtml(order.orderDate) || "-"}</span></div>
           </div>
         </div>
 
         <div class="inv-customer">
-          <div><b>ชื่อลูกค้า:</b> <span>${order.shop || "-"}</span></div>
-          <div><b>เบอร์โทรศัพท์:</b> <span>${order.phone || "-"}</span></div>
-          <div><b>เลขประจำตัวผู้เสียภาษี:</b> <span>${(order.taxId && order.taxId !== "-") ? order.taxId : "-"}</span></div>
-          <div><b>ที่อยู่จัดส่ง:</b> <span>${order.address || "-"}</span></div>
+          <div><b>ชื่อลูกค้า:</b> <span>${escapeHtml(order.shop) || "-"}</span></div>
+          <div><b>เบอร์โทรศัพท์:</b> <span>${escapeHtml(order.phone) || "-"}</span></div>
+          <div><b>เลขประจำตัวผู้เสียภาษี:</b> <span>${(order.taxId && order.taxId !== "-") ? escapeHtml(order.taxId) : "-"}</span></div>
+          <div><b>ที่อยู่จัดส่ง:</b> <span>${escapeHtml(order.address) || "-"}</span></div>
         </div>
 
         <table class="inv-table">
@@ -467,11 +491,11 @@ function renderInvoices() {
           <tbody>${itemsHtml}</tbody>
         </table>
 
-        ${order.note ? `<div class="inv-note"><b>หมายเหตุ:</b> <span>${order.note}</span></div>` : ""}
+        ${order.note ? `<div class="inv-note"><b>หมายเหตุ:</b> <span>${escapeHtml(order.note)}</span></div>` : ""}
 
         <div class="inv-bottom">
           <div class="inv-payment-box">
-            <img class="inv-qr-img" id="${qrId}" src="" alt="PromptPay QR">
+            <img class="inv-qr-img" id="${escapeHtml(qrId)}" src="" alt="PromptPay QR">
             <div class="inv-payment-info">
               <div class="lbl">สแกนผ่านแอปธนาคารเพื่อชำระเงิน</div>
               <div><b>ชื่อบัญชี:</b> นางสาวชวัลลักษณ์ ไพบูลย์ชมพู</div>
@@ -538,7 +562,7 @@ function computePageSlices(node, canvas, pageHeightPx, marginPx) {
   const containerTop = node.getBoundingClientRect().top;
   const scale = canvas.width / node.getBoundingClientRect().width;
   const protectedEls = Array.from(node.querySelectorAll(
-    '.inv-header, .inv-customer, table.inv-table thead, table.inv-table tbody tr, #mNoteWrap, .inv-bottom, .inv-signatures'
+    '.inv-header, .inv-customer, table.inv-table thead, table.inv-table tbody tr, .inv-note, .inv-bottom, .inv-signatures'
   )).filter(el => el.offsetParent !== null);
 
   const rects = protectedEls.map(el => {
@@ -546,18 +570,18 @@ function computePageSlices(node, canvas, pageHeightPx, marginPx) {
     return { top: (r.top - containerTop) * scale, bottom: (r.bottom - containerTop) * scale };
   });
 
-  const theadEl = node.querySelector('table.inv-table thead');
-  const tbodyEl = node.querySelector('table.inv-table tbody');
-  let theadRectPx = null;
-  let tbodyBottomPx = 0;
-  if (theadEl) {
-    const r = theadEl.getBoundingClientRect();
-    theadRectPx = { top: (r.top - containerTop) * scale, bottom: (r.bottom - containerTop) * scale };
-  }
-  if (tbodyEl) {
-    const r = tbodyEl.getBoundingClientRect();
-    tbodyBottomPx = (r.bottom - containerTop) * scale;
-  }
+  // เก็บตำแหน่งหัว/ท้ายตารางของ "ทุกใบบิล" ที่เลือกไว้ (ไม่ใช่แค่ใบแรก) เพื่อให้ซ้ำหัวตาราง
+  // ถูกใบเวลาพิมพ์/ดาวน์โหลด PDF พร้อมกันหลายบิล
+  const tableInfos = Array.from(node.querySelectorAll('table.inv-table')).map(t => {
+    const theadEl = t.querySelector('thead');
+    const tbodyEl = t.querySelector('tbody');
+    const theadR = theadEl.getBoundingClientRect();
+    const tbodyR = tbodyEl.getBoundingClientRect();
+    return {
+      theadRectPx: { top: (theadR.top - containerTop) * scale, bottom: (theadR.bottom - containerTop) * scale },
+      tbodyBottomPx: (tbodyR.bottom - containerTop) * scale
+    };
+  });
 
   const EPS = 0.5;
   const pages = [];
@@ -567,8 +591,12 @@ function computePageSlices(node, canvas, pageHeightPx, marginPx) {
     const pageIndex = pages.length;
     const topReserve = pageIndex === 0 ? 0 : marginPx;
     const bottomReserve = marginPx;
-    const repeatHeader = pageIndex > 0 && theadRectPx && pageStart >= theadRectPx.bottom - EPS && pageStart < tbodyBottomPx - EPS;
-    const headerReserve = repeatHeader ? (theadRectPx.bottom - theadRectPx.top) : 0;
+    // ถ้าหน้าใหม่เริ่มกลางตารางของ "บิลใบไหน" ให้ซ้ำหัวตารางของบิลใบนั้น (ไม่ใช่ใบแรกเสมอ)
+    const activeTable = pageIndex > 0
+      ? tableInfos.find(t => pageStart >= t.theadRectPx.bottom - EPS && pageStart < t.tbodyBottomPx - EPS)
+      : null;
+    const repeatHeader = !!activeTable;
+    const headerReserve = repeatHeader ? (activeTable.theadRectPx.bottom - activeTable.theadRectPx.top) : 0;
     const limit = pageStart + pageHeightPx - topReserve - bottomReserve - headerReserve;
 
     let lastGoodBottom = -1;
@@ -589,12 +617,19 @@ function computePageSlices(node, canvas, pageHeightPx, marginPx) {
     }
     sliceEnd = Math.min(Math.max(sliceEnd, pageStart + 1), canvas.height);
 
-    pages.push({ start: pageStart, end: sliceEnd, repeatHeader, topMarginPx: topReserve, bottomMarginPx: bottomReserve });
+    pages.push({
+      start: pageStart,
+      end: sliceEnd,
+      repeatHeader,
+      theadRectPx: activeTable ? activeTable.theadRectPx : null,
+      topMarginPx: topReserve,
+      bottomMarginPx: bottomReserve
+    });
     pageStart = sliceEnd;
   }
 
   if (pages.length) pages[pages.length - 1].bottomMarginPx = 0;
-  return { pages, theadRectPx };
+  return { pages };
 }
 
 /* ================= ดาวน์โหลด PDF (แบ่งหน้าเลียนแบบการพิมพ์จริง ไม่บีบ ไม่ตัดกลางแถว) ================= */
@@ -614,10 +649,10 @@ document.getElementById("pdfBtn").addEventListener("click", async () => {
     const pageHeightPx = pageH * pxPerMm;
     const marginPx = 14 * pxPerMm; // เท่ากับระยะขอบหน้ากระดาษตอนสั่งพิมพ์ (14mm)
 
-    const { pages, theadRectPx } = computePageSlices(node, canvas, pageHeightPx, marginPx);
+    const { pages } = computePageSlices(node, canvas, pageHeightPx, marginPx);
 
     pages.forEach((pg, i) => {
-      const headerHeightPx = (pg.repeatHeader && theadRectPx) ? (theadRectPx.bottom - theadRectPx.top) : 0;
+      const headerHeightPx = (pg.repeatHeader && pg.theadRectPx) ? (pg.theadRectPx.bottom - pg.theadRectPx.top) : 0;
       const bodyHeightPx = pg.end - pg.start;
       const totalHeightPx = Math.max(1, Math.round(pg.topMarginPx + headerHeightPx + bodyHeightPx + pg.bottomMarginPx));
       const pageCanvas = document.createElement("canvas");
@@ -629,7 +664,7 @@ document.getElementById("pdfBtn").addEventListener("click", async () => {
 
       let y = pg.topMarginPx;
       if (headerHeightPx > 0) {
-        ctx.drawImage(canvas, 0, theadRectPx.top, canvas.width, headerHeightPx, 0, y, canvas.width, headerHeightPx);
+        ctx.drawImage(canvas, 0, pg.theadRectPx.top, canvas.width, headerHeightPx, 0, y, canvas.width, headerHeightPx);
         y += headerHeightPx;
       }
       ctx.drawImage(canvas, 0, pg.start, canvas.width, bodyHeightPx, 0, y, canvas.width, bodyHeightPx);
